@@ -1,0 +1,100 @@
+# PHL <-> NYP fare collection config
+# Team 2 - BUDT770 Capstone
+
+market:
+  name: "PHL-NYP"
+  # Rail/bus endpoints are downtown-to-downtown.
+  origin:
+    code: "PHL"
+    city: "Philadelphia, PA"
+    rail_station: "PHL"        # Amtrak 30th Street Station
+    airport: "PHL"
+  destination:
+    code: "NYP"
+    city: "New York, NY"
+    rail_station: "NYP"        # Amtrak Penn Station
+    airports: ["EWR", "LGA", "JFK"]
+
+collection:
+  # Travel dates to monitor: every day in this inclusive range.
+  travel_date_start: "2026-10-30"
+  travel_date_end: "2026-12-31"
+
+  # The scraper refuses to run after this date (change this one line to extend).
+  # Travel dates on/before this get a complete 0-DBD booking curve.
+  last_snapshot_date: "2026-12-10"
+
+  directions: ["outbound", "inbound"]   # outbound = PHL->NYP, inbound = NYP->PHL
+
+  # Smart tiered coverage: near-term dates get every departure,
+  # far dates get a representative sample across the day.
+  tiering:
+    full_sweep_within_dbd: 14           # <= this many days out -> every departure
+    sample_target_hours: [6, 8, 12, 17, 19, 21]   # far dates: nearest departure to each hour
+
+  # Politeness. Raise delays if you start seeing blocks.
+  # These are the conservative defaults applied to any source without an
+  # override below.
+  rate_limit:
+    min_delay_seconds: 1.5
+    max_delay_seconds: 4.0
+    max_retries: 3
+    timeout_seconds: 30
+
+    # Per-source overrides.
+    #
+    # flix tolerates a short delay well: measured 2026-10-29, dropping it to
+    # 0.6-1.2s cut that source from 342s to 131s with 2399 rows and zero
+    # errors.
+    #
+    # megabus does NOT. The same change made it 4x SLOWER (341s -> 1391s):
+    # it starts throttling, our retry backoff kicks in, and the run drags.
+    # Leave megabus on the conservative default. Going faster here is not a
+    # trade-off, it is simply worse.
+    per_source:
+      flix:
+        min_delay_seconds: 0.6
+        max_delay_seconds: 1.2
+
+sources:
+  # --- verified working -----------------------------------------------------
+  flix: true          # FlixBus + Greyhound (one API covers both)
+  megabus: true       # Megabus + Peter Pan (one API covers both)
+  wanderu: true       # ALL Amtrak services (Acela/Regional/Keystone/+) and
+                      # OurBus; also cross-checks the bus fares above
+
+  # --- not yet implemented; see docs/STATUS.md ------------------------------
+  # Amtrak blocks the fare API behind Akamai (403), and the booking form
+  # fills correctly but does not submit under automation. Still being solved.
+  amtrak: false       # Acela / Northeast Regional / Keystone / long-distance
+  air: false          # PHL -> EWR/LGA/JFK
+  transit: false      # SEPTA + NJ Transit via Trenton
+  driving: false      # rental scrape attempt + modeled driving cost
+
+# Modeled driving/rental cost for the PHL<->NYP trip. Per the project's own
+# rule, every number here is either cited or explicitly marked as an
+# assumption - never presented as a fact we don't actually have.
+driving_assumptions:
+  distance_miles_one_way: 97          # ASSUMPTION: commonly cited 30th St <-> Penn Station driving distance
+  irs_mileage_rate_usd: 0.76          # SOURCED: IRS 2026 H2 business standard mileage rate (IR-2026-29)
+  toll_one_way_usd: 15.33             # SOURCED (approximate): NJ Turnpike to Interchange 4, E-ZPass, PHL->NYC direction
+  parking_per_day_usd: 45             # ASSUMPTION: Midtown Manhattan garage, typical daily rate - adjust if you have a better figure
+  rental_car_per_day_usd: 65          # ASSUMPTION: economy one-way rental, no live quote collected (see docs/STATUS.md)
+
+# Census ACS API key (free, instant signup: api.census.gov/data/key_signup.html).
+# Required as of May 2026 for all Census Data API requests.
+#
+# Do NOT put the real key here - this file is committed to git and shared
+# with the team. Set it as an environment variable instead, which
+# analysis/census.py already checks first:
+#   Windows (PowerShell):  $env:CENSUS_API_KEY = "your-key-here"
+#   Mac/Linux:              export CENSUS_API_KEY=your-key-here
+# Leave this blank to skip the census affordability section -
+# analysis/census.py degrades cleanly with no fabricated numbers either way.
+census_api_key: ""
+
+storage:
+  db_path: "data/fares.db"
+  raw_dir: "data/raw"
+  export_dir: "data/exports"
+  keep_raw_days: 90

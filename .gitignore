@@ -1,0 +1,21 @@
+# Collected data - regenerates daily via run_daily.py, too large for git
+# (raw archive + exports + sqlite db were 4+ GB at last check)
+data/
+
+# Generated reports - regenerate any time via tools/run_analysis.py
+reports/figures/
+reports/tables/
+reports/dashboard.html
+reports/findings.md
+reports/findings.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
