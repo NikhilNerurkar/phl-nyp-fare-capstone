@@ -10,8 +10,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (booking_curves, census, dashboard, driving, elasticity, fare_gap,
-              overlap, personas, recommendations, signals, spending_power)
+from . import (booking_curves, census, dashboard, depth_charts, driving, elasticity,
+              fare_gap, overlap, personas, recommendations, signals, spending_power)
 from .clean import coverage_summary, load_clean, load_raw
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +53,18 @@ def run() -> dict:
     # --- core question 4: leader/follower signal ----------------------------
     findings["leader_follower_regional_vs_greyhound"] = signals.leader_follower(
         df, FIGURES / "leader_follower_regional_vs_greyhound.png")
+
+    # --- additional presentation figures -------------------------------------
+    findings["fare_volatility_by_group"] = depth_charts.fare_volatility_by_group(
+        df, FIGURES / "fare_volatility_by_group.png")
+    findings["book_ahead_savings"] = depth_charts.book_ahead_savings(
+        df, FIGURES / "book_ahead_savings.png")
+    findings["fare_distribution_by_group"] = depth_charts.fare_distribution_by_group(
+        df, FIGURES / "fare_distribution_by_group.png")
+    sold_out = depth_charts.flixbus_sold_out_by_dbd(FIGURES / "flixbus_sold_out_by_dbd.png")
+    findings["flixbus_sold_out_by_dbd"] = sold_out
+    findings["collection_coverage_by_source"] = depth_charts.collection_coverage_by_source(
+        FIGURES / "collection_coverage_by_source.png")
 
     # --- revenue sensitivity under sourced price elasticity ----------------
     rail_services = ["Acela", "Northeast Regional", "Keystone Service"]
@@ -150,6 +162,34 @@ def _write_findings_md(f: dict) -> None:
               f"Significant: {lf.get('significant', 'n/a')}. "
               f"Repeats across halves: {lf.get('repeats_across_dates', 'n/a')}.",
               "![](figures/leader_follower_regional_vs_greyhound.png)", ""]
+
+    lines += ["## Additional presentation figures", ""]
+    vol = f["fare_volatility_by_group"]["table"]
+    if vol:
+        lines += [f"**Fare volatility leaderboard:** least volatile "
+                 f"{vol[0]['group']} ({vol[0]['volatility_pct']}%) to most "
+                 f"volatile {vol[-1]['group']} ({vol[-1]['volatility_pct']}%).",
+                 "![](figures/fare_volatility_by_group.png)", ""]
+    savings = f["book_ahead_savings"]["table"]
+    if savings:
+        best = max(savings, key=lambda r: r["savings_usd"])
+        lines += [f"**Book-ahead savings:** biggest payoff is {best['group']} - "
+                 f"${best['savings_usd']} ({best['savings_pct']}%) cheaper booking "
+                 f"~{f['book_ahead_savings']['early_dbd']}d out vs. "
+                 f"~{f['book_ahead_savings']['late_dbd']}d out.",
+                 "![](figures/book_ahead_savings.png)", ""]
+    lines += ["**Fare distribution (not just the median):**",
+              "![](figures/fare_distribution_by_group.png)", ""]
+    so = f.get("flixbus_sold_out_by_dbd")
+    if so:
+        lines += [f"**The one real demand signal in this dataset:** FlixBus/Greyhound "
+                 f"sold-out rate peaks at {so['peak_sold_out_pct']}% around "
+                 f"{so['peak_sold_out_dbd']} days before departure.",
+                 "![](figures/flixbus_sold_out_by_dbd.png)", ""]
+    cov = f["collection_coverage_by_source"]
+    lines += [f"**Collection scale:** {cov['snapshot_days']} snapshot days, "
+             f"{cov['total_rows']:,} total rows across {len(cov['sources'])} sources.",
+             "![](figures/collection_coverage_by_source.png)", ""]
 
     lines += ["## Revenue sensitivity under sourced price elasticity",
               "Sourced ranges (FHWA literature review; Acela assigned the "

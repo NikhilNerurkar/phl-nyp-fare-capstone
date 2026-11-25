@@ -26,6 +26,16 @@ PARQUET = ROOT / "data" / "exports" / "fares_latest.parquet"
 # drop them - see docs/DATA_DICTIONARY.md.
 MAX_SURFACE_DURATION_MIN = 210
 
+# Found later, while building presentation figures (2026-11-25): the duration
+# cutoff above does not catch every airport product. JFK Terminal 1 vans run
+# 160-210 minutes - inside the cutoff - priced around $70, while real OurBus
+# intercity departures in that same duration band price around $10-15. This
+# single contamination was large: 10,196 of 27,249 OurBus rows (37%) carry an
+# "Airport" stop name, versus zero for Amtrak/Greyhound/FlixBus. The docs
+# already recommended filtering on stop name, not just duration - this just
+# actually implements that.
+AIRPORT_STOP_KEYWORD = "Airport"
+
 # Operators seen so rarely, or so narrowly mapped, that they are noise in any
 # chart with a legend. Folded into "Other" rather than dropped, so their
 # price observations still count in totals.
@@ -51,18 +61,29 @@ def load_clean(min_priced_status: str = "ok") -> pd.DataFrame:
                                       no_service/error). Those statuses are
                                       real signals, kept in load_raw(), just
                                       not mixed into price statistics.
-      2. duration <= 210 min        - drops the airport-van / park-and-ride
-                                      contamination documented above. Rows
-                                      with duration_min missing are kept
-                                      (mostly Amtrak, which doesn't carry one
-                                      from every source) rather than dropped.
-      3. price_usd not null         - belt-and-suspenders on (1).
+      2. duration <= 210 min        - drops the longest airport-van / park-
+                                      and-ride contamination documented
+                                      above. Rows with duration_min missing
+                                      are kept (mostly Amtrak, which doesn't
+                                      carry one from every source) rather
+                                      than dropped.
+      3. no "Airport" in stop name   - catches the shorter airport products
+                                      step (2) misses (see AIRPORT_STOP_
+                                      KEYWORD above) - 37% of raw OurBus rows.
+                                      Rows with no stop name recorded are
+                                      kept.
+      4. price_usd not null         - belt-and-suspenders on (1).
     """
     df = load_raw()
     df = df[df["status"] == min_priced_status].copy()
     too_long = df["duration_min"].notna() & (
         df["duration_min"] > MAX_SURFACE_DURATION_MIN)
     df = df[~too_long]
+    is_airport = pd.Series(False, index=df.index)
+    for col in ("origin_stop", "dest_stop"):
+        if col in df.columns:
+            is_airport |= df[col].str.contains(AIRPORT_STOP_KEYWORD, case=False, na=False)
+    df = df[~is_airport]
     df = df[df["price_usd"].notna()]
     df["operator_display"] = _fold_minor_operators(df)
     return df

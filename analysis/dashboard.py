@@ -206,6 +206,56 @@ def build(findings: dict, out_path: Path) -> None:
     <div class="cap">Floating bars show the full range implied by the sourced elasticity
     estimates &mdash; the range itself is the finding.</div></div></div>
 </section>
+"""
+
+    # --- additional presentation figures ------------------------------------
+    vol = f["fare_volatility_by_group"]["table"]
+    sav = f["book_ahead_savings"]["table"]
+    sold_out = f.get("flixbus_sold_out_by_dbd")
+    cov = f["collection_coverage_by_source"]
+    best_sav = max(sav, key=lambda r: r["savings_usd"]) if sav else None
+    html += f"""
+<section>
+  <div class="tag">Depth add-on</div>
+  <h2>Pricing behavior, beyond the median</h2>
+  <p class="lede">Three more concrete questions a rider or a pricing team would
+     actually ask, built from data already collected above.</p>
+  <div class="chart-grid">
+    <div class="chart-card"><img src="figures/fare_volatility_by_group.png">
+      <div class="cap">{vol[0]['group'] if vol else ''} reprices the least day-to-day;
+      {vol[-1]['group'] if vol else ''} reprices the most &mdash; same DBD-band method as
+      the leader/follower signal above, so trend and real volatility aren't conflated.</div></div>
+    <div class="chart-card"><img src="figures/book_ahead_savings.png">
+      <div class="cap">{f"Biggest payoff: {best_sav['group']} riders save ${best_sav['savings_usd']} ({best_sav['savings_pct']}%) booking ahead." if best_sav else ''}</div></div>
+    <div class="chart-card"><img src="figures/fare_distribution_by_group.png">
+      <div class="cap">Full fare spread at a fixed booking window &mdash; two groups can
+      share a median and still differ a lot in how predictable that price is.</div></div>
+  </div>
+</section>
+"""
+    if sold_out:
+        html += f"""
+<section>
+  <div class="tag">Depth add-on</div>
+  <h2>The one real demand signal in this project</h2>
+  <p class="lede">Every other "demand" number on this page is a modeled or sourced
+     estimate (see the revenue sensitivity section above) because we don't have
+     real booking volume data. This is the one exception: FlixBus/Greyhound's own
+     sold_out flag, a real observed outcome, not a model.</p>
+  <div class="callout">Sold-out rate peaks at <b>{sold_out['peak_sold_out_pct']}%</b>
+     around <b>{sold_out['peak_sold_out_dbd']} days</b> before departure.</div>
+  <div class="chart-grid"><div class="chart-card"><img src="figures/flixbus_sold_out_by_dbd.png"></div></div>
+</section>
+"""
+    html += f"""
+<section>
+  <div class="tag">Transparency</div>
+  <h2>Collection scale and reliability</h2>
+  <p class="lede">Not a pricing finding &mdash; a look at the collection process itself,
+     so a reader can see this is built on {cov['total_rows']:,} real observed rows
+     across {cov['snapshot_days']} days, not a handful of samples.</p>
+  <div class="chart-grid"><div class="chart-card"><img src="figures/collection_coverage_by_source.png"></div></div>
+</section>
 
 <section>
   <div class="tag">Deferred, sponsor-flagged</div>

@@ -111,6 +111,17 @@ longer is almost certainly a different product. This is exactly the kind of
 decision that belongs in the cleaning layer, not the scraper — the scraper
 records what the source said, and `tools/qa_report.py` surfaces the outliers.
 
+**Update, 2026-11-25:** the duration cutoff alone was not enough. A second
+JFK product (Terminal 1, not the Terminal 4 van above) runs 160–210
+minutes — inside the cutoff — priced around $70, while real OurBus
+intercity departures in that same duration band price around $10–15.
+`analysis/clean.py`'s `load_clean()` now also drops any row where
+`origin_stop` or `dest_stop` contains "Airport". This was a large fix:
+**10,196 of 27,249 raw OurBus rows (37%)** carried an airport stop name,
+versus zero for Amtrak/Greyhound/FlixBus. Found while building the fare
+volatility figure — OurBus was showing 97% day-over-day volatility, which
+turned out to be this contamination, not real pricing behavior.
+
 ### Aggregator prices run higher than operator prices
 
 Same operator, same day, two sources (2026-10-29):
