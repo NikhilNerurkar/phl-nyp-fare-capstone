@@ -95,6 +95,7 @@ def build(findings: dict, out_path: Path) -> None:
     pb = f["persona_business_traveler"]
     ps = f["persona_student"]
     pf = f["persona_family"]
+    recs = f.get("recommendations", [])
 
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>PHL-NYP Pricing Analysis</title><style>{CSS}</style></head><body>
@@ -116,6 +117,30 @@ def build(findings: dict, out_path: Path) -> None:
         html += (f'<div class="callout warn">Data quality: thin/partial '
                  f'snapshot day(s) &mdash; {", ".join(f["thin_or_missing_days"])}. '
                  f'See docs/DATA_DICTIONARY.md.</div>')
+
+    # --- Recommendations: the sponsor-facing output, up top -----------------
+    if recs:
+        cards = ""
+        for i, r in enumerate(recs, 1):
+            cards += f"""
+    <div class="persona-card">
+      <h3>{i}. {r['segment']}</h3>
+      <div class="stat-line"><b>Action:</b> {r['action']}</div>
+      <div class="stat-line"><b>Expected impact:</b> {r['expected_impact']}</div>
+      <div class="stat-line"><b>Trade-off:</b> {r['trade_off']}</div>
+      <div class="stat-line" style="color:var(--muted);"><b>Risk:</b> {r['risk']}</div>
+    </div>"""
+        html += f"""
+<section>
+  <div class="tag">Recommendations</div>
+  <h2>What this data says Amtrak should actually do</h2>
+  <p class="lede">Every number below traces to real fare data or a cited elasticity
+     estimate (see analysis/elasticity.py) &mdash; nothing here is invented, and where
+     no sourced number exists the risk is stated qualitatively rather than guessed.</p>
+  <div class="persona-grid">{cards}
+  </div>
+</section>
+"""
 
     # --- Q2: booking behavior ------------------------------------------------
     html += f"""
@@ -154,12 +179,32 @@ def build(findings: dict, out_path: Path) -> None:
 <section>
   <div class="tag">Core question 4</div>
   <h2>Does one mode lead or follow the other's price changes?</h2>
-  <div class="callout {'good' if lf.get('enough_data') else 'warn'}">
+  <div class="callout {'good' if lf.get('significant') and lf.get('repeats_across_dates') else 'warn'}">
      {lf['n_snapshot_days']} snapshot days available &mdash; reading:
      <b>{lf.get('reading', 'n/a')}</b>.
-     {'' if lf.get('enough_data') else ' Re-run this page after more days of collection before citing a lead/lag claim.'}</div>
+     Statistically significant (p&lt;0.05): <b>{lf.get('significant', 'n/a')}</b>.
+     Repeats across first/second half of the window: <b>{lf.get('repeats_across_dates', 'not enough days yet')}</b>.
+     A lead/lag is only named on this dashboard when both of those are true.</div>
   <div class="chart-grid"><div class="chart-card"><img src="figures/leader_follower_regional_vs_greyhound.png">
     <div class="cap">Cross-correlation of day-over-day % fare change, by lag (days).</div></div></div>
+</section>
+
+<section>
+  <div class="tag">Depth add-on</div>
+  <h2>Revenue sensitivity under sourced price elasticity</h2>
+  <p class="lede">We checked for a real demand/quantity signal in our own data first &mdash;
+     Wanderu's seats_remaining field turned out to be a placeholder (always the literal
+     value 1 across 225k+ rows), and FlixBus's sold_out flag is the only real one, bus-only.
+     So this applies SOURCED elasticity estimates from the transportation economics
+     literature to our own real fare data, reported as a range under uncertainty, never
+     a single invented number &mdash; see analysis/elasticity.py for full citations.</p>
+  <div class="callout">Rail own-price elasticity: <b>-0.32 to -1.20</b> (FHWA literature
+     review). Acela assigned the less-elastic end per a CBO finding that 1970s Amtrak
+     demand was inelastic specifically for Northeast Corridor business travel &mdash;
+     flagged here as dated, pre-deregulation evidence, not a modern point estimate.</div>
+  <div class="chart-grid"><div class="chart-card"><img src="figures/revenue_elasticity_scenarios.png">
+    <div class="cap">Floating bars show the full range implied by the sourced elasticity
+    estimates &mdash; the range itself is the finding.</div></div></div>
 </section>
 
 <section>

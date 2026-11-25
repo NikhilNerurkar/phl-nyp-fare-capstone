@@ -18,6 +18,18 @@ weeks of snapshots we have today. The framing doc is explicit about this:
 the honest read today is "no stable signal yet, re-run as more data lands" -
 and the code is written so that re-running it later is the only thing that
 changes.
+
+Two checks enforce that standard instead of just hoping we remember it:
+  1. Statistical significance (p < 0.05) at the strongest lag, via
+     scipy's Pearson test - a correlation of 0.6 off 10 points is not
+     evidence, no matter how it looks on a bar chart.
+  2. Split-half repeatability: the same best lag's correlation is
+     recomputed separately on the first half and second half of the
+     snapshot days. "Repeats across dates" means the sign agrees in both
+     halves, not just in the pooled number. This needs enough days to
+     split meaningfully (MIN_DAYS_FOR_SPLIT_CHECK below); until then we
+     say so rather than skip the check silently.
+A leader is only named when BOTH pass.
 """
 from __future__ import annotations
 
@@ -25,11 +37,13 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy import stats
 
 from . import style
 from .clean import same_source_subset
 
 MIN_DAYS_FOR_SIGNAL = 10  # below this, cross-correlation is noise dressed as insight
+MIN_DAYS_FOR_SPLIT_CHECK = 14  # below this, a first-half/second-half split is too thin to mean anything
 
 
 def daily_series_at_dbd_band(df: pd.DataFrame, dbd_lo: int = 5, dbd_hi: int = 9,
@@ -75,16 +89,28 @@ def leader_follower(df: pd.DataFrame, out_path: Path,
     both = pd.concat([rail_pct.rename("rail"), bus_pct.rename("bus")],
                      axis=1).dropna()
 
-    lags = list(range(-max_lag, max_lag + 1))
-    corrs = []
-    for lag in lags:
+    def _lagged_pair(frame: pd.DataFrame, lag: int) -> pd.DataFrame:
         if lag >= 0:
-            a, b = both["rail"].iloc[:len(both) - lag or None], \
-                   both["bus"].shift(-lag).iloc[:len(both) - lag or None]
+            a = frame["rail"].iloc[:len(frame) - lag or None]
+            b = frame["bus"].shift(-lag).iloc[:len(frame) - lag or None]
         else:
-            a, b = both["rail"].shift(lag), both["bus"]
-        pair = pd.concat([a, b], axis=1).dropna()
-        corrs.append(pair.iloc[:, 0].corr(pair.iloc[:, 1]) if len(pair) >= 3 else float("nan"))
+            a = frame["rail"].shift(lag)
+            b = frame["bus"]
+        return pd.concat([a, b], axis=1).dropna()
+
+    def _corr_and_p(frame: pd.DataFrame, lag: int) -> tuple[float, float, int]:
+        pair = _lagged_pair(frame, lag)
+        if len(pair) < 3:
+            return float("nan"), float("nan"), len(pair)
+        r, p = stats.pearsonr(pair.iloc[:, 0], pair.iloc[:, 1])
+        return r, p, len(pair)
+
+    lags = list(range(-max_lag, max_lag + 1))
+    corrs, pvalues = [], []
+    for lag in lags:
+        r, p, _ = _corr_and_p(both, lag)
+        corrs.append(r)
+        pvalues.append(p)
 
     style.apply_style()
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -103,15 +129,57 @@ def leader_follower(df: pd.DataFrame, out_path: Path,
                 subtitle=status_note)
 
     valid = {lag: c for lag, c in zip(lags, corrs) if not pd.isna(c)}
-    if valid:
-        best_lag = max(valid, key=lambda k: abs(valid[k]))
-        result["strongest_lag"] = best_lag
-        result["strongest_corr"] = round(valid[best_lag], 2)
+    if not valid:
+        result["reading"] = "insufficient overlapping data"
+        return result
+
+    best_lag = max(valid, key=lambda k: abs(valid[k]))
+    best_corr = valid[best_lag]
+    best_p = pvalues[lags.index(best_lag)]
+    result["strongest_lag"] = best_lag
+    result["strongest_corr"] = round(best_corr, 2)
+    result["strongest_corr_pvalue"] = round(best_p, 4) if not pd.isna(best_p) else None
+    result["significant"] = bool(not pd.isna(best_p) and best_p < 0.05)
+
+    # Split-half repeatability: same lag, same sign, on two independent
+    # halves of the snapshot days - the framing doc's own bar for naming a
+    # leader ("repeats across dates"), not just a pooled p-value.
+    if n_days >= MIN_DAYS_FOR_SPLIT_CHECK:
+        mid = len(both) // 2
+        first_r, _, first_n = _corr_and_p(both.iloc[:mid], best_lag)
+        second_r, _, second_n = _corr_and_p(both.iloc[mid:], best_lag)
+        same_sign = (not pd.isna(first_r) and not pd.isna(second_r)
+                    and (first_r > 0) == (second_r > 0) == (best_corr > 0))
+        result["split_half_check"] = {
+            "first_half_corr": round(first_r, 2) if not pd.isna(first_r) else None,
+            "first_half_n": first_n,
+            "second_half_corr": round(second_r, 2) if not pd.isna(second_r) else None,
+            "second_half_n": second_n,
+            "repeats_across_halves": bool(same_sign),
+        }
+        result["repeats_across_dates"] = bool(same_sign)
+    else:
+        result["split_half_check"] = None
+        result["repeats_across_dates"] = None  # not enough days to check yet, not "no"
+
+    name_a_leader = (result["enough_data"] and result["significant"]
+                     and result["repeats_across_dates"] is True)
+    if not result["enough_data"]:
+        result["reading"] = "inconclusive - too few snapshot days"
+    elif not result["significant"]:
+        result["reading"] = (f"no statistically significant lead/lag "
+                             f"(p={result['strongest_corr_pvalue']}) - moves together")
+    elif result["repeats_across_dates"] is None:
+        result["reading"] = (f"{best_lag:+d}d lag is significant (p={result['strongest_corr_pvalue']}) "
+                             f"but not yet old enough to split-check for repeatability - "
+                             f"treat as preliminary")
+    elif not name_a_leader:
+        result["reading"] = ("significant in the pooled data but sign flips between "
+                             "the first and second half of snapshot days - not a "
+                             "repeating signal, treat as noise")
+    else:
         result["reading"] = (
-            "inconclusive - too few snapshot days" if not result["enough_data"] else
             f"{rail_service} appears to lead by {best_lag}d" if best_lag > 0 else
             f"{bus_benchmark} appears to lead by {-best_lag}d" if best_lag < 0 else
             "moves together, no lead/lag")
-    else:
-        result["reading"] = "insufficient overlapping data"
     return result

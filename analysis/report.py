@@ -10,7 +10,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import booking_curves, census, dashboard, driving, fare_gap, overlap, personas, signals
+from . import (booking_curves, census, dashboard, driving, elasticity, fare_gap,
+              overlap, personas, recommendations, signals)
 from .clean import coverage_summary, load_clean, load_raw
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +54,18 @@ def run() -> dict:
     findings["leader_follower_regional_vs_greyhound"] = signals.leader_follower(
         df, FIGURES / "leader_follower_regional_vs_greyhound.png")
 
+    # --- revenue sensitivity under sourced price elasticity ----------------
+    rail_services = ["Acela", "Northeast Regional", "Keystone Service"]
+    current_fares = {svc: df.loc[df["service_name"] == svc, "price_usd"].median()
+                     for svc in rail_services}
+    current_fares = {k: v for k, v in current_fares.items() if v == v}
+    scenario_table = elasticity.revenue_scenario_table(
+        list(current_fares.keys()), current_median_fares=current_fares)
+    scenario_table.to_csv(TABLES / "revenue_elasticity_scenarios.csv", index=False)
+    findings["revenue_elasticity_scenarios"] = elasticity.plot_revenue_scenarios(
+        scenario_table, FIGURES / "revenue_elasticity_scenarios.png")
+    findings["elasticity_sources"] = elasticity.SOURCES
+
     # --- WAS-NYC overlap: designed no-op until that data exists ------------
     findings["was_nyc_overlap_status"] = overlap.overlap_readiness_check()
 
@@ -84,6 +97,9 @@ def run() -> dict:
                 income, FIGURES / "census_income_distribution.png")
     else:
         findings["census_reason"] = income.get("reason")
+
+    # --- recommendations: the sponsor-facing output, not just description --
+    findings["recommendations"] = recommendations.generate_recommendations(df, findings)
 
     _write_findings_md(findings)
     (REPORTS / "findings.json").write_text(json.dumps(findings, indent=2, default=str))
@@ -125,8 +141,28 @@ def _write_findings_md(f: dict) -> None:
     lf = f["leader_follower_regional_vs_greyhound"]
     lines += ["## Leader/follower signal (core question 4)",
               f"{lf['n_snapshot_days']} snapshot days available. "
-              f"Reading: **{lf.get('reading', 'n/a')}**.",
+              f"Reading: **{lf.get('reading', 'n/a')}**. "
+              f"Significant: {lf.get('significant', 'n/a')}. "
+              f"Repeats across halves: {lf.get('repeats_across_dates', 'n/a')}.",
               "![](figures/leader_follower_regional_vs_greyhound.png)", ""]
+
+    lines += ["## Revenue sensitivity under sourced price elasticity",
+              "Sourced ranges (FHWA literature review; Acela assigned the "
+              "less-elastic end per CBO's business-travel finding - see "
+              "analysis/elasticity.py for full citations):",
+              "```\n" + json.dumps(f.get("elasticity_sources", {}), indent=2) + "\n```",
+              "![](figures/revenue_elasticity_scenarios.png)",
+              "Full scenario table: tables/revenue_elasticity_scenarios.csv", ""]
+
+    recs = f.get("recommendations", [])
+    if recs:
+        lines += ["## Recommendations", ""]
+        for i, r in enumerate(recs, 1):
+            lines += [f"### {i}. {r['segment']}",
+                      f"**Action:** {r['action']}",
+                      f"**Expected impact:** {r['expected_impact']}",
+                      f"**Trade-off:** {r['trade_off']}",
+                      f"**Risk:** {r['risk']}", ""]
 
     ov = f["was_nyc_overlap_status"]
     lines += ["## WAS-NYC overlap (deferred)",
