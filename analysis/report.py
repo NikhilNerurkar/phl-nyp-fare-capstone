@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import (booking_curves, census, dashboard, driving, elasticity, fare_gap,
-              overlap, personas, recommendations, signals)
+              overlap, personas, recommendations, signals, spending_power)
 from .clean import coverage_summary, load_clean, load_raw
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -95,6 +95,11 @@ def run() -> dict:
             findings["census_affordability_summary"] = census.affordability_summary(afford)
             findings["census_income_distribution"] = census.plot_income_distribution(
                 income, FIGURES / "census_income_distribution.png")
+            power = spending_power.real_spending_power()
+            if power is not None:
+                findings["spending_power"] = power
+                findings["spending_power_chart"] = spending_power.plot_spending_power(
+                    power, FIGURES / "spending_power.png")
     else:
         findings["census_reason"] = income.get("reason")
 
@@ -191,6 +196,25 @@ def _write_findings_md(f: dict) -> None:
             f"households earn under $35k/yr. NYC: "
             f"{dist.get('nyc_pct_households_under_35k')}%.",
             "![](figures/census_income_distribution.png)", "",
+        ]
+        sp = f.get("spending_power")
+        if sp:
+            lines += [
+                "**Spending power (cost-of-living-adjusted income):** NYC "
+                f"households earn {sp['nyc_nominal_premium_pct']}% more "
+                f"nominally, but after adjusting for cost of living (BEA "
+                f"Regional Price Parities, 2023) the real gap is "
+                f"{sp['nyc_real_premium_pct']}%. Nominal: "
+                f"${sp['nominal_median_income']['Philadelphia']:,.0f} (PHL) vs "
+                f"${sp['nominal_median_income']['New York City']:,.0f} (NYC, "
+                f"household-weighted across 5 boroughs - not a single Census "
+                f"figure). Real: "
+                f"${sp['real_median_income']['Philadelphia']:,.0f} (PHL) vs "
+                f"${sp['real_median_income']['New York City']:,.0f} (NYC).",
+                "![](figures/spending_power.png)", "",
+            ]
+
+        lines += [
             "**% of households in a bracket where a round-trip fare exceeds "
             "2% of monthly income** (affordability lens, not a demand model "
             "- see analysis/census.py):",

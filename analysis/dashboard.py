@@ -273,6 +273,26 @@ def build(findings: dict, out_path: Path) -> None:
   <tbody>{rows}</tbody></table>
 </section>
 """
+        sp = f.get("spending_power")
+        if sp:
+            html += f"""
+<section>
+  <div class="tag">Depth add-on</div>
+  <h2>Spending power: who does the fare actually cost more, in real terms?</h2>
+  <p class="lede">Nominal income understates Philadelphia and overstates NYC &mdash; a
+     dollar buys less in New York. Adjusted using BEA Regional Price Parities
+     (all items, 2023 vintage, national average = 100): Philadelphia
+     <b>{sp['regional_price_parity']['Philadelphia']}</b>, New York City
+     <b>{sp['regional_price_parity']['New York City']}</b>. NYC's figure is a
+     household-weighted approximation across its 5 boroughs, not a single
+     Census-published value.</p>
+  <div class="callout">NYC households earn <b>{sp['nyc_nominal_premium_pct']:+.1f}%</b> more
+     than Philadelphia's, nominally. After adjusting for cost of living, the real gap
+     is only <b>{sp['nyc_real_premium_pct']:+.1f}%</b>.</div>
+  <div class="chart-grid"><div class="chart-card"><img src="figures/spending_power.png">
+    <div class="cap">Nominal vs cost-of-living-adjusted median household income.</div></div></div>
+</section>
+"""
     else:
         html += f"""
 <section>
